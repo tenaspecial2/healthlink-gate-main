@@ -536,6 +536,8 @@ function EarningsCard() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [earned, setEarned] = useState(0);
+  const [botEarned, setBotEarned] = useState(0);
+  const [botNet, setBotNet] = useState(0);
   const [payouts, setPayouts] = useState<Payout[]>([]);
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState("");
@@ -544,7 +546,16 @@ function EarningsCard() {
 
   const load = async () => {
     if (!user) return;
-    const [{ data: cons }, { data: reqs }] = await Promise.all([
+
+    // Get doctor's telegram_id from profile
+    const { data: profData } = await supabase
+      .from("profiles")
+      .select("telegram_id")
+      .eq("id", user.id)
+      .maybeSingle();
+    const telegramId = (profData as any)?.telegram_id;
+
+    const [{ data: cons }, { data: reqs }, { data: botTxns }] = await Promise.all([
       supabase
         .from("consultations")
         .select("amount")
@@ -555,9 +566,17 @@ function EarningsCard() {
         .select("id, amount, telegram_username, status, admin_note, created_at")
         .eq("doctor_id", user.id)
         .order("created_at", { ascending: false }),
+      telegramId
+        ? supabase
+            .from("bot_transactions")
+            .select("price, net_amount")
+            .eq("doctor_telegram_id", Number(telegramId))
+        : Promise.resolve({ data: [] }),
     ]);
     setEarned((cons ?? []).reduce((s, c) => s + (c.amount ?? 0), 0));
     setPayouts((reqs as Payout[]) ?? []);
+    setBotEarned((botTxns ?? []).reduce((s: number, r: any) => s + (r.price ?? 0), 0));
+    setBotNet((botTxns ?? []).reduce((s: number, r: any) => s + (r.net_amount ?? 0), 0));
     setLoading(false);
   };
 
@@ -621,11 +640,17 @@ function EarningsCard() {
           </div>
         ) : (
           <>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <Stat label="Total earned" value={`${earned} ETB`} />
-              <Stat label="Requested / paid" value={`${locked} ETB`} />
-              <Stat label="Available" value={`${available} ETB`} highlight />
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Stat label="Website earnings" value={`${earned} ETB`} />
+              <Stat label="Bot earnings (gross)" value={`${botEarned} ETB`} />
+              <Stat label="Bot net (after 10%)" value={`${botNet} ETB`} />
+              <Stat label="Available to withdraw" value={`${Math.max(earned + botNet - locked, 0)} ETB`} highlight />
             </div>
+            {botEarned > 0 && (
+              <p className="text-xs text-muted-foreground">
+                💡 Bot earnings include a 10% platform commission already deducted in the "net" figure above.
+              </p>
+            )}
 
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild>
