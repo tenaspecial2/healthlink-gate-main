@@ -14,7 +14,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth, homeForUser } from "@/hooks/useAuth";
 import { verifyTelegramAuth } from "@/lib/telegram-auth";
 
-const BOT_USERNAME = "tenachin2_bot";
+const BOT_USERNAME = "Tenaspecialbot";
 
 export const Route = createFileRoute("/")({
   head: () => ({
