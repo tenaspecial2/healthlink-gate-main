@@ -1,27 +1,46 @@
 import { useEffect, useState } from "react";
-import { Camera, Loader2 } from "lucide-react";
+import { Camera, Loader2, Plus, Trash2 } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { supabase } from "@/integrations/supabase/client";
 import { WEEKDAYS } from "@/lib/tena";
 
-export type DaySlot = { off: boolean; from: string; to: string };
-export type Schedule = Record<string, DaySlot>;
+// ── Types ──────────────────────────────────────────────────────────
+export type TimeRange = { from: string; to: string };
+export type DaySlot   = { off: boolean; slots: TimeRange[] };
+export type Schedule  = Record<string, DaySlot>;
+
+const DEFAULT_SLOT: TimeRange = { from: "09:00", to: "17:00" };
 
 export const defaultSchedule: Schedule = Object.fromEntries(
   WEEKDAYS.map((d) => [
     d,
-    { off: d === "Sunday", from: "09:00", to: "17:00" } satisfies DaySlot,
+    { off: d === "Sunday", slots: [{ ...DEFAULT_SLOT }] } satisfies DaySlot,
   ]),
 );
 
+/** Parse schedule — handles both old single-slot format and new multi-slot format */
 export function parseSchedule(raw: string | null | undefined): Schedule {
   if (!raw) return defaultSchedule;
   try {
-    const parsed = JSON.parse(raw) as Schedule;
-    return { ...defaultSchedule, ...parsed };
+    const parsed = JSON.parse(raw) as Record<string, any>;
+    const result: Schedule = {};
+    for (const d of WEEKDAYS) {
+      const v = parsed[d] ?? defaultSchedule[d]!;
+      if (Array.isArray(v.slots)) {
+        result[d] = { off: Boolean(v.off), slots: v.slots };
+      } else {
+        // Legacy single-slot format: { off, from, to }
+        result[d] = {
+          off: Boolean(v.off),
+          slots: [{ from: v.from ?? "09:00", to: v.to ?? "17:00" }],
+        };
+      }
+    }
+    return result;
   } catch {
     return defaultSchedule;
   }
@@ -29,9 +48,17 @@ export function parseSchedule(raw: string | null | undefined): Schedule {
 
 export function scheduleSummary(raw: string | null | undefined): string[] {
   const s = parseSchedule(raw);
-  return WEEKDAYS.filter((d) => !s[d]?.off).map((d) => `${d} ${s[d]!.from}–${s[d]!.to}`);
+  const lines: string[] = [];
+  for (const d of WEEKDAYS) {
+    const day = s[d];
+    if (!day || day.off) continue;
+    const times = day.slots.map((sl) => `${sl.from}–${sl.to}`).join(", ");
+    lines.push(`${d}: ${times}`);
+  }
+  return lines;
 }
 
+// ── ScheduleEditor ─────────────────────────────────────────────────
 export function ScheduleEditor({
   value,
   onChange,
@@ -39,46 +66,94 @@ export function ScheduleEditor({
   value: Schedule;
   onChange: (v: Schedule) => void;
 }) {
-  const set = (day: string, patch: Partial<DaySlot>) =>
+  const setDay = (day: string, patch: Partial<DaySlot>) =>
     onChange({ ...value, [day]: { ...value[day]!, ...patch } });
+
+  const addSlot = (day: string) => {
+    const existing = value[day]!.slots;
+    onChange({
+      ...value,
+      [day]: { ...value[day]!, slots: [...existing, { from: "09:00", to: "17:00" }] },
+    });
+  };
+
+  const removeSlot = (day: string, idx: number) => {
+    const slots = value[day]!.slots.filter((_, i) => i !== idx);
+    onChange({ ...value, [day]: { ...value[day]!, slots: slots.length ? slots : [{ ...DEFAULT_SLOT }] } });
+  };
+
+  const patchSlot = (day: string, idx: number, patch: Partial<TimeRange>) => {
+    const slots = value[day]!.slots.map((s, i) => (i === idx ? { ...s, ...patch } : s));
+    onChange({ ...value, [day]: { ...value[day]!, slots } });
+  };
 
   return (
     <div className="space-y-2">
       <Label>Weekly availability</Label>
       <p className="text-xs text-muted-foreground">
-        Patients see these hours on your profile, so they know when to expect a reply.
+        Add one or more time slots per day. Patients see these hours on your profile.
       </p>
       <div className="mt-2 space-y-2">
         {WEEKDAYS.map((day) => {
-          const slot = value[day] ?? { off: true, from: "09:00", to: "17:00" };
+          const dayData = value[day] ?? { off: true, slots: [{ ...DEFAULT_SLOT }] };
           return (
-            <div
-              key={day}
-              className="flex flex-wrap items-center gap-3 rounded-lg border border-border p-3"
-            >
-              <span className="w-24 text-sm font-medium">{day}</span>
-              <Switch
-                checked={!slot.off}
-                onCheckedChange={(checked) => set(day, { off: !checked })}
-                aria-label={`Available on ${day}`}
-              />
-              {slot.off ? (
-                <span className="text-xs text-muted-foreground">Not available</span>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="time"
-                    value={slot.from}
-                    onChange={(e) => set(day, { from: e.target.value })}
-                    className="w-32"
-                  />
-                  <span className="text-muted-foreground">–</span>
-                  <Input
-                    type="time"
-                    value={slot.to}
-                    onChange={(e) => set(day, { to: e.target.value })}
-                    className="w-32"
-                  />
+            <div key={day} className="rounded-lg border border-border p-3 space-y-2">
+              {/* Day header */}
+              <div className="flex items-center gap-3">
+                <span className="w-24 text-sm font-medium">{day}</span>
+                <Switch
+                  checked={!dayData.off}
+                  onCheckedChange={(checked) => setDay(day, { off: !checked })}
+                  aria-label={`Available on ${day}`}
+                />
+                {dayData.off && (
+                  <span className="text-xs text-muted-foreground">Not available</span>
+                )}
+                {!dayData.off && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto h-7 gap-1 text-xs"
+                    onClick={() => addSlot(day)}
+                  >
+                    <Plus className="h-3 w-3" /> Add slot
+                  </Button>
+                )}
+              </div>
+
+              {/* Time slots */}
+              {!dayData.off && (
+                <div className="space-y-1.5 pl-2">
+                  {dayData.slots.map((slot, idx) => (
+                    <div key={idx} className="flex flex-wrap items-center gap-2">
+                      <Input
+                        type="time"
+                        value={slot.from}
+                        onChange={(e) => patchSlot(day, idx, { from: e.target.value })}
+                        className="w-32"
+                      />
+                      <span className="text-muted-foreground text-sm">–</span>
+                      <Input
+                        type="time"
+                        value={slot.to}
+                        onChange={(e) => patchSlot(day, idx, { to: e.target.value })}
+                        className="w-32"
+                      />
+                      {dayData.slots.length > 1 && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive hover:text-destructive"
+                          onClick={() => removeSlot(day, idx)}
+                          aria-label="Remove slot"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -93,10 +168,7 @@ export function ScheduleEditor({
 export function useAvatarUrl(path: string | null | undefined) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (!path) {
-      setUrl(null);
-      return;
-    }
+    if (!path) { setUrl(null); return; }
     let active = true;
     void supabase.storage
       .from("avatars")
@@ -104,9 +176,7 @@ export function useAvatarUrl(path: string | null | undefined) {
       .then(({ data }) => {
         if (active) setUrl(data?.signedUrl ?? null);
       });
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, [path]);
   return url;
 }

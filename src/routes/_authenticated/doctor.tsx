@@ -270,7 +270,7 @@ function StatusCard({ app }: { app: Application }) {
 
 const emptyForm = {
   full_name: "",
-  email: "",
+  telegram: "",
   phone: "",
   gender: "",
   city: "",
@@ -297,7 +297,7 @@ function ApplicationForm({ onSubmitted }: { onSubmitted: () => Promise<void> }) 
     setForm((f) => ({
       ...f,
       full_name: f.full_name || profile?.full_name || "",
-      email: f.email || profile?.email || "",
+      telegram: f.telegram || (profile as any)?.telegram_username || "",
       phone: f.phone || profile?.phone || "",
     }));
   }, [profile]);
@@ -307,7 +307,6 @@ function ApplicationForm({ onSubmitted }: { onSubmitted: () => Promise<void> }) 
   const valid = useMemo(
     () =>
       form.full_name.trim() &&
-      form.email.trim() &&
       form.phone.trim() &&
       form.specialty &&
       form.license_number.trim() &&
@@ -340,7 +339,7 @@ function ApplicationForm({ onSubmitted }: { onSubmitted: () => Promise<void> }) 
       const { error } = await supabase.from("doctor_applications").insert({
         doctor_id: user.id,
         full_name: form.full_name.trim(),
-        email: form.email.trim(),
+        email: form.telegram.trim() ? `@${form.telegram.trim().replace(/^@/, "")}` : null,
         phone: form.phone.trim(),
         gender: form.gender || null,
         city: form.city.trim() || null,
@@ -392,8 +391,13 @@ function ApplicationForm({ onSubmitted }: { onSubmitted: () => Promise<void> }) 
             <Field label="Full name *">
               <Input value={form.full_name} onChange={(e) => set("full_name")(e.target.value)} maxLength={100} required />
             </Field>
-            <Field label="Email *">
-              <Input type="email" value={form.email} onChange={(e) => set("email")(e.target.value)} maxLength={255} required />
+            <Field label="Telegram username">
+              <Input
+                value={form.telegram}
+                onChange={(e) => set("telegram")(e.target.value)}
+                maxLength={100}
+                placeholder="@yourusername"
+              />
             </Field>
             <Field label="Phone *">
               <Input value={form.phone} onChange={(e) => set("phone")(e.target.value)} maxLength={20} required />

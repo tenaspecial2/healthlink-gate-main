@@ -14,6 +14,8 @@ import {
   CheckCircle2,
   XCircle,
   Copy,
+  BookOpen,
+  Send,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -40,6 +42,7 @@ import {
 } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useAvatarUrl } from "@/components/DoctorProfileFields";
 import { PLANS, PAYMENT_DETAILS, SPECIALTIES, planById } from "@/lib/tena";
 
 export const Route = createFileRoute("/_authenticated/patient")({
@@ -71,6 +74,7 @@ type Doctor = {
   bio: string | null;
   languages: string | null;
   workplace: string | null;
+  avatar_path: string | null;
 };
 
 type Consultation = {
@@ -101,7 +105,7 @@ function PatientPage() {
       supabase
         .from("public_doctor_profiles")
         .select(
-          "doctor_id, full_name, specialty, city, experience_years, bio, languages, workplace",
+          "doctor_id, full_name, specialty, city, experience_years, bio, languages, workplace, avatar_path",
         )
         .order("created_at", { ascending: false }),
       user
@@ -258,6 +262,26 @@ function PatientPage() {
                 ))}
               </div>
             )}
+
+            {/* Free Resources Banner */}
+            <div className="mt-10 rounded-xl border border-border bg-gradient-to-r from-accent/40 to-accent/10 p-5 flex flex-col sm:flex-row items-center gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
+                <BookOpen className="h-6 w-6" />
+              </div>
+              <div className="flex-1 text-center sm:text-left">
+                <p className="font-semibold">Free Health Documents 📄</p>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  Get free PDFs, health guides and connect with other specialists — all on our Telegram bot.
+                </p>
+              </div>
+              <Button
+                variant="hero"
+                className="gap-2 shrink-0"
+                onClick={() => window.open("https://t.me/tenanetbot", "_blank")}
+              >
+                <Send className="h-4 w-4" /> Open Free Bot
+              </Button>
+            </div>
           </div>
         )}
       </div>
@@ -513,13 +537,24 @@ export function PaymentInfo() {
   );
 }
 
+function DoctorAvatar({ path }: { path: string | null }) {
+  const url = useAvatarUrl(path);
+  return (
+    <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-accent text-accent-foreground">
+      {url ? (
+        <img src={url} alt="Doctor profile" className="h-full w-full object-cover" />
+      ) : (
+        <Stethoscope className="h-6 w-6" />
+      )}
+    </div>
+  );
+}
+
 function DoctorCard({ doctor, onSelect }: { doctor: Doctor; onSelect: () => void }) {
   return (
     <div className="flex flex-col rounded-xl border border-border bg-card p-5 shadow-soft transition-shadow hover:shadow-card">
       <div className="flex items-center gap-3">
-        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-accent text-accent-foreground">
-          <Stethoscope className="h-5 w-5" />
-        </div>
+        <DoctorAvatar path={doctor.avatar_path} />
         <div className="min-w-0">
           <div className="truncate font-semibold">{doctor.full_name}</div>
           <div className="truncate text-xs text-muted-foreground">{doctor.specialty}</div>
