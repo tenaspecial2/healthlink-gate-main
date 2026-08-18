@@ -1,25 +1,23 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { HeartPulse, Stethoscope, ShieldCheck, MessageSquareHeart, Loader2 } from "lucide-react";
+import { HeartPulse, Stethoscope, ShieldCheck, MessageSquareHeart, Loader2, Send, CheckCircle2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import { BrandLogo } from "@/components/BrandLogo";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
-
 import { useAuth, homeForUser } from "@/hooks/useAuth";
-import { verifyTelegramAuth } from "@/lib/telegram-auth";
+import { generateLoginToken, pollLoginToken, createSessionFromToken } from "@/lib/bot-auth";
 
 const BOT_USERNAME = "Tenaspecialbot";
 
-export const Route = createFileRoute("/")({\
+export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       { title: "Tena Specal — Talk to Verified Specialist Doctors" },
       { name: "description", content: "Sign up as a patient or a doctor on Tena Specal and start secure online specialist consultations in Ethiopia." },
-      { property: "og:title", content: "Tena Specal — Talk to Verified Specialist Doctors" },
-      { property: "og:description", content: "Sign up as a patient or a doctor on Tena Specal and start secure online specialist consultations in Ethiopia." },
     ],
   }),
   component: LandingPage,
@@ -44,13 +42,11 @@ function LandingPage() {
         <div>
           <BrandLogo size={54} subtitle="የጤና እገዛ እና የጤና ባለሙያዎች መድረክ" />
           <h1 className="mt-10 text-4xl font-extrabold leading-tight sm:text-5xl">
-            Real doctors.
-            <br />
+            Real doctors.<br />
             <span className="text-gradient-brand">Real answers.</span>
           </h1>
           <p className="mt-5 max-w-md text-base text-muted-foreground">
-            Tena Specal connects patients with verified specialist doctors for private online
-            consultations — no queues, no travel, no guesswork.
+            Tena Specal connects patients with verified specialist doctors for private online consultations — no queues, no travel, no guesswork.
           </p>
           <div className="mt-9 grid gap-3 sm:grid-cols-2">
             <Feature icon={<ShieldCheck className="h-5 w-5" />} title="Verified doctors only" text="Every doctor uploads a certificate reviewed by our team." />
@@ -70,103 +66,164 @@ function LandingPage() {
 function Feature({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) {
   return (
     <div className="rounded-xl border border-border bg-card/70 p-4 shadow-soft">
-      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-accent-foreground">
-        {icon}
-      </div>
+      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-accent-foreground">{icon}</div>
       <div className="mt-3 text-sm font-semibold">{title}</div>
       <p className="mt-1 text-xs text-muted-foreground">{text}</p>
     </div>
   );
 }
 
+type Step = "idle" | "waiting" | "done";
+
 function AuthCard({ onDone }: { onDone: () => Promise<void> }) {
   const [role, setRole] = useState<Role>("patient");
+  const [step, setStep] = useState<Step>("idle");
+  const [token, setToken] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const widgetRef = useRef<HTMLDivElement>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const container = widgetRef.current;
-    if (!container) return;
-    container.innerHTML = "";
+  // Clean up polling on unmount
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
-    (window as any).onTelegramAuth = async (tgUser: any) => {
-      setBusy(true);
-      try {
-        const result = await verifyTelegramAuth({ data: { telegramUser: tgUser, role } });
-        if (!result?.token) throw new Error("Auth failed");
+  const startLogin = async () => {
+    setBusy(true);
+    try {
+      const { token: t } = await generateLoginToken({ data: { role } });
+      setToken(t);
+      setStep("waiting");
 
-        const { error } = await supabase.auth.verifyOtp({
-          type: "email",
-          token_hash: result.token,
-        });
-        if (error) throw error;
+      // Open bot deep link
+      window.open(`https://t.me/${BOT_USERNAME}?start=login_${t}`, "_blank");
 
-        toast.success("Welcome to Tena Specal! 🚀");
-        await onDone();
-        const { data } = await supabase.auth.getUser();
-        const userId = data.user?.id;
-        if (userId) {
-          const [{ data: prof }, { data: roles }] = await Promise.all([
-            supabase.from("profiles").select("account_type").eq("id", userId).maybeSingle(),
-            supabase.from("user_roles").select("role").eq("user_id", userId),
-          ]);
-          const admin = Boolean(roles?.some((r: any) => r.role === "admin"));
-          void navigate({ to: homeForUser({ isAdmin: admin, accountType: prof?.account_type ?? role }) });
+      // Poll every 2 seconds
+      pollRef.current = setInterval(async () => {
+        try {
+          const res = await pollLoginToken({ data: { token: t } });
+          if (res.verified) {
+            clearInterval(pollRef.current!);
+            await finishLogin(t);
+          }
+        } catch {
+          // Token expired or error
+          clearInterval(pollRef.current!);
+          toast.error("Login expired. Please try again.");
+          setStep("idle");
+          setToken(null);
         }
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Telegram login failed.");
-      } finally {
-        setBusy(false);
+      }, 2000);
+    } catch (err) {
+      toast.error("Failed to start login. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const finishLogin = async (t: string) => {
+    try {
+      const { hashed_token } = await createSessionFromToken({ data: { token: t } });
+      if (!hashed_token) throw new Error("No token");
+
+      const { error } = await supabase.auth.verifyOtp({ type: "email", token_hash: hashed_token });
+      if (error) throw error;
+
+      setStep("done");
+      toast.success("Welcome to Tena Specal! 🚀");
+      await onDone();
+
+      const { data } = await supabase.auth.getUser();
+      const userId = data.user?.id;
+      if (userId) {
+        const [{ data: prof }, { data: roles }] = await Promise.all([
+          supabase.from("profiles").select("account_type").eq("id", userId).maybeSingle(),
+          supabase.from("user_roles").select("role").eq("user_id", userId),
+        ]);
+        const admin = Boolean(roles?.some((r: any) => r.role === "admin"));
+        void navigate({ to: homeForUser({ isAdmin: admin, accountType: prof?.account_type ?? role }) });
       }
-    };
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Login failed.");
+      setStep("idle");
+      setToken(null);
+    }
+  };
 
-    const script = document.createElement("script");
-    script.src = "https://telegram.org/js/telegram-widget.js?22";
-    script.setAttribute("data-telegram-login", BOT_USERNAME);
-    script.setAttribute("data-size", "large");
-    script.setAttribute("data-radius", "8");
-    script.setAttribute("data-onauth", "onTelegramAuth(user)");
-    script.setAttribute("data-request-access", "write");
-    script.async = true;
-    container.appendChild(script);
-
-    return () => { delete (window as any).onTelegramAuth; };
-  }, [role]);
+  const reset = () => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    setStep("idle");
+    setToken(null);
+  };
 
   return (
     <Card className="border-border shadow-card">
       <CardContent className="p-6">
         {/* Role selector */}
-        <Tabs value={role} onValueChange={(v) => setRole(v as Role)}>
+        <Tabs value={role} onValueChange={(v) => { setRole(v as Role); reset(); }}>
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="patient" className="gap-2"><HeartPulse className="h-4 w-4" /> Patient</TabsTrigger>
             <TabsTrigger value="doctor" className="gap-2"><Stethoscope className="h-4 w-4" /> Doctor</TabsTrigger>
           </TabsList>
-          <TabsContent value="patient" className="mt-4">
+          <TabsContent value="patient" className="mt-3">
             <p className="text-sm text-muted-foreground">Browse specialists, choose a plan and start chatting.</p>
           </TabsContent>
-          <TabsContent value="doctor" className="mt-4">
+          <TabsContent value="doctor" className="mt-3">
             <p className="text-sm text-muted-foreground">Join as a doctor, complete your profile and get verified.</p>
           </TabsContent>
         </Tabs>
 
-        {/* Telegram Login */}
-        <div className="mt-8 flex flex-col items-center gap-3">
-          <p className="text-sm font-semibold text-foreground">Sign up or log in with Telegram</p>
-          <p className="text-xs text-muted-foreground text-center">
-            One tap — no password needed. Your Telegram identity creates or accesses your account.
-          </p>
-          <div ref={widgetRef} className="mt-3 flex justify-center" />
-          {busy && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Signing you in…
+        {/* Login section */}
+        <div className="mt-6 flex flex-col items-center gap-4 text-center">
+          {step === "idle" && (
+            <>
+              <p className="text-sm font-semibold">Sign up or log in with Telegram</p>
+              <p className="text-xs text-muted-foreground">
+                Click below — your Telegram Bot will open and send you a login confirmation.
+              </p>
+              <Button
+                variant="hero"
+                size="lg"
+                className="w-full gap-2"
+                onClick={startLogin}
+                disabled={busy}
+              >
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                Login via Telegram Bot
+              </Button>
+            </>
+          )}
+
+          {step === "waiting" && (
+            <div className="flex w-full flex-col items-center gap-4">
+              <div className="rounded-full bg-accent p-4">
+                <Loader2 className="h-8 w-8 animate-spin text-accent-foreground" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold">Waiting for confirmation…</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Open the Telegram bot that just opened and press <strong>Start</strong> or <strong>Confirm</strong>.
+                </p>
+              </div>
+              <Button variant="outline" size="sm" className="gap-2" onClick={reset}>
+                <RefreshCw className="h-3 w-3" /> Try again
+              </Button>
+              <button
+                className="text-xs text-muted-foreground underline"
+                onClick={() => window.open(`https://t.me/${BOT_USERNAME}?start=login_${token}`, "_blank")}
+              >
+                Bot didn't open? Click here
+              </button>
+            </div>
+          )}
+
+          {step === "done" && (
+            <div className="flex flex-col items-center gap-2">
+              <CheckCircle2 className="h-10 w-10 text-green-500" />
+              <p className="text-sm font-semibold">Signed in! Redirecting…</p>
             </div>
           )}
         </div>
 
-        <p className="mt-8 text-center text-xs text-muted-foreground">
+        <p className="mt-6 text-center text-xs text-muted-foreground">
           By continuing you agree that consultations are advisory and not a replacement for emergency care.
         </p>
       </CardContent>
