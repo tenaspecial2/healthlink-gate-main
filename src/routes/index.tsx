@@ -12,7 +12,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 
 import { useAuth, homeForUser } from "@/hooks/useAuth";
-import { verifyTelegramAuth } from "@/server/telegram-auth";
+import { verifyTelegramAuth } from "@/lib/telegram-auth";
 
 const BOT_USERNAME = "tenachin2_bot";
 
