@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { HeartPulse, Stethoscope, ShieldCheck, MessageSquareHeart, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { HeartPulse, Stethoscope, ShieldCheck, MessageSquareHeart, Loader2, Send } from "lucide-react";
 import { toast } from "sonner";
 
 import { BrandLogo } from "@/components/BrandLogo";
@@ -12,6 +12,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 
 import { useAuth, homeForUser } from "@/hooks/useAuth";
+import { verifyTelegramAuth } from "@/server/telegram-auth";
+
+const BOT_USERNAME = "tenachin2_bot";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -112,40 +115,81 @@ function AuthCard({ onDone }: { onDone: () => Promise<void> }) {
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState(false);
+  const widgetRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
+  // ── Telegram Login Widget ────────────────────────────────────────
+  useEffect(() => {
+    const container = widgetRef.current;
+    if (!container) return;
+    container.innerHTML = "";
+
+    (window as any).onTelegramAuth = async (tgUser: any) => {
+      setBusy(true);
+      try {
+        const result = await verifyTelegramAuth({ data: { telegramUser: tgUser, role } });
+        if (!result?.token) throw new Error("Auth failed");
+
+        const { error } = await supabase.auth.verifyOtp({
+          type: "email",
+          token_hash: result.token,
+        });
+        if (error) throw error;
+
+        toast.success("Signed in with Telegram! 🚀");
+        await onDone();
+        const { data } = await supabase.auth.getUser();
+        const userId = data.user?.id;
+        if (userId) {
+          const [{ data: prof }, { data: roles }] = await Promise.all([
+            supabase.from("profiles").select("account_type").eq("id", userId).maybeSingle(),
+            supabase.from("user_roles").select("role").eq("user_id", userId),
+          ]);
+          const admin = Boolean(roles?.some((r: any) => r.role === "admin"));
+          void navigate({ to: homeForUser({ isAdmin: admin, accountType: prof?.account_type ?? role }) });
+        }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Telegram login failed.");
+      } finally {
+        setBusy(false);
+      }
+    };
+
+    const script = document.createElement("script");
+    script.src = "https://telegram.org/js/telegram-widget.js?22";
+    script.setAttribute("data-telegram-login", BOT_USERNAME);
+    script.setAttribute("data-size", "large");
+    script.setAttribute("data-radius", "8");
+    script.setAttribute("data-onauth", "onTelegramAuth(user)");
+    script.setAttribute("data-request-access", "write");
+    script.async = true;
+    container.appendChild(script);
+
+    return () => { delete (window as any).onTelegramAuth; };
+  }, [role]);
+
+  // ── Email / Password submit ──────────────────────────────────────
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     try {
       if (mode === "signup") {
-        if (!fullName.trim()) {
-          toast.error("Please enter your full name.");
-          return;
-        }
+        if (!fullName.trim()) { toast.error("Please enter your full name."); return; }
         const { error } = await supabase.auth.signUp({
           email: email.trim(),
           password,
           options: {
             emailRedirectTo: window.location.origin,
-            data: {
-              full_name: fullName.trim(),
-              phone: phone.trim(),
-              account_type: role,
-            },
+            data: { full_name: fullName.trim(), phone: phone.trim(), account_type: role },
           },
         });
         if (error) throw error;
         toast.success("Account created. Welcome to Tena Specal!");
       } else {
-        const { error } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
-          password,
-        });
+        const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
         if (error) throw error;
         toast.success("Signed in.");
       }
-
       await onDone();
       const { data } = await supabase.auth.getUser();
       const userId = data.user?.id;
@@ -154,10 +198,8 @@ function AuthCard({ onDone }: { onDone: () => Promise<void> }) {
           supabase.from("profiles").select("account_type").eq("id", userId).maybeSingle(),
           supabase.from("user_roles").select("role").eq("user_id", userId),
         ]);
-        const admin = Boolean(roles?.some((r) => r.role === "admin"));
-        void navigate({
-          to: homeForUser({ isAdmin: admin, accountType: prof?.account_type ?? role }),
-        });
+        const admin = Boolean(roles?.some((r: any) => r.role === "admin"));
+        void navigate({ to: homeForUser({ isAdmin: admin, accountType: prof?.account_type ?? role }) });
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Something went wrong.");
@@ -166,98 +208,71 @@ function AuthCard({ onDone }: { onDone: () => Promise<void> }) {
     }
   };
 
-
   return (
     <Card className="border-border shadow-card">
       <CardContent className="p-6">
+        {/* Role selector */}
         <Tabs value={role} onValueChange={(v) => setRole(v as Role)}>
           <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="patient" className="gap-2">
-              <HeartPulse className="h-4 w-4" /> Patient
-            </TabsTrigger>
-            <TabsTrigger value="doctor" className="gap-2">
-              <Stethoscope className="h-4 w-4" /> Doctor
-            </TabsTrigger>
+            <TabsTrigger value="patient" className="gap-2"><HeartPulse className="h-4 w-4" /> Patient</TabsTrigger>
+            <TabsTrigger value="doctor" className="gap-2"><Stethoscope className="h-4 w-4" /> Doctor</TabsTrigger>
           </TabsList>
           <TabsContent value="patient" className="mt-4">
-            <p className="text-sm text-muted-foreground">
-              Create a patient account to browse specialists, choose a plan and start chatting.
-            </p>
+            <p className="text-sm text-muted-foreground">Create a patient account to browse specialists, choose a plan and start chatting.</p>
           </TabsContent>
           <TabsContent value="doctor" className="mt-4">
-            <p className="text-sm text-muted-foreground">
-              Join as a doctor. You'll complete a professional profile and upload your certificate
-              for verification.
-            </p>
+            <p className="text-sm text-muted-foreground">Join as a doctor. You'll complete a professional profile and upload your certificate for verification.</p>
           </TabsContent>
         </Tabs>
 
-        <div className="mt-5 flex rounded-lg bg-muted p-1 text-sm font-medium">
+        {/* Telegram Login */}
+        <div className="mt-5 flex flex-col items-center gap-2">
+          <p className="text-xs text-muted-foreground font-medium">Sign in instantly with Telegram</p>
+          <div ref={widgetRef} className="flex justify-center" />
+          {busy && <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />}
+        </div>
+
+        {/* Divider */}
+        <div className="my-5 flex items-center gap-3">
+          <div className="h-px flex-1 bg-border" />
+          <span className="text-xs text-muted-foreground">or use email</span>
+          <div className="h-px flex-1 bg-border" />
+        </div>
+
+        {/* Mode toggle */}
+        <div className="flex rounded-lg bg-muted p-1 text-sm font-medium">
           {(["signup", "signin"] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setMode(m)}
-              className={`flex-1 rounded-md py-1.5 transition-colors ${
-                mode === m ? "bg-card text-foreground shadow-soft" : "text-muted-foreground"
-              }`}
-            >
+            <button key={m} type="button" onClick={() => setMode(m)}
+              className={`flex-1 rounded-md py-1.5 transition-colors ${mode === m ? "bg-card text-foreground shadow-soft" : "text-muted-foreground"}`}>
               {m === "signup" ? "Sign up" : "Log in"}
             </button>
           ))}
         </div>
 
+        {/* Email / Password form */}
         <form onSubmit={submit} className="mt-5 space-y-4">
           {mode === "signup" && (
             <>
               <div className="space-y-1.5">
                 <Label htmlFor="fullName">Full name</Label>
-                <Input
-                  id="fullName"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  placeholder={role === "doctor" ? "Dr. Abebe Kebede" : "Hanna Tesfaye"}
-                  maxLength={100}
-                  required
-                />
+                <Input id="fullName" value={fullName} onChange={(e) => setFullName(e.target.value)}
+                  placeholder={role === "doctor" ? "Dr. Abebe Kebede" : "Hanna Tesfaye"} maxLength={100} required />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="phone">Phone number</Label>
-                <Input
-                  id="phone"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="09xxxxxxxx"
-                  maxLength={20}
-                />
+                <Input id="phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="09xxxxxxxx" maxLength={20} />
               </div>
             </>
           )}
           <div className="space-y-1.5">
             <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              maxLength={255}
-              required
-            />
+            <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com" maxLength={255} required />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="password">Password</Label>
-            <Input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)
-              }
-              placeholder="At least 6 characters"
-              minLength={6}
-              maxLength={72}
-              required
-            />
+            <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+              placeholder="At least 6 characters" minLength={6} maxLength={72} required />
           </div>
           <Button type="submit" variant="hero" size="lg" className="w-full" disabled={busy}>
             {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -266,8 +281,7 @@ function AuthCard({ onDone }: { onDone: () => Promise<void> }) {
         </form>
 
         <p className="mt-4 text-center text-xs text-muted-foreground">
-          By continuing you agree that consultations are advisory and not a replacement for
-          emergency care.
+          By continuing you agree that consultations are advisory and not a replacement for emergency care.
         </p>
       </CardContent>
     </Card>
