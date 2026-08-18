@@ -1,12 +1,9 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { HeartPulse, Stethoscope, ShieldCheck, MessageSquareHeart, Loader2, Send } from "lucide-react";
+import { HeartPulse, Stethoscope, ShieldCheck, MessageSquareHeart, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { BrandLogo } from "@/components/BrandLogo";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
@@ -16,20 +13,13 @@ import { verifyTelegramAuth } from "@/lib/telegram-auth";
 
 const BOT_USERNAME = "Tenaspecialbot";
 
-export const Route = createFileRoute("/")({
+export const Route = createFileRoute("/")({\
   head: () => ({
     meta: [
       { title: "Tena Specal — Talk to Verified Specialist Doctors" },
-      {
-        name: "description",
-        content:
-          "Sign up as a patient or a doctor on Tena Specal and start secure online specialist consultations in Ethiopia.",
-      },
+      { name: "description", content: "Sign up as a patient or a doctor on Tena Specal and start secure online specialist consultations in Ethiopia." },
       { property: "og:title", content: "Tena Specal — Talk to Verified Specialist Doctors" },
-      {
-        property: "og:description",
-        content: "Sign up as a patient or a doctor on Tena Specal and start secure online specialist consultations in Ethiopia.",
-      },
+      { property: "og:description", content: "Sign up as a patient or a doctor on Tena Specal and start secure online specialist consultations in Ethiopia." },
     ],
   }),
   component: LandingPage,
@@ -62,31 +52,13 @@ function LandingPage() {
             Tena Specal connects patients with verified specialist doctors for private online
             consultations — no queues, no travel, no guesswork.
           </p>
-
           <div className="mt-9 grid gap-3 sm:grid-cols-2">
-            <Feature
-              icon={<ShieldCheck className="h-5 w-5" />}
-              title="Verified doctors only"
-              text="Every doctor uploads a certificate reviewed by our team."
-            />
-            <Feature
-              icon={<MessageSquareHeart className="h-5 w-5" />}
-              title="Private chat"
-              text="Chat one-on-one once your payment is confirmed."
-            />
-            <Feature
-              icon={<HeartPulse className="h-5 w-5" />}
-              title="All specialties"
-              text="From general care to cardiology and mental health."
-            />
-            <Feature
-              icon={<Stethoscope className="h-5 w-5" />}
-              title="Fair plans"
-              text="300, 500 or 1000 ETB — pay only for what you need."
-            />
+            <Feature icon={<ShieldCheck className="h-5 w-5" />} title="Verified doctors only" text="Every doctor uploads a certificate reviewed by our team." />
+            <Feature icon={<MessageSquareHeart className="h-5 w-5" />} title="Private chat" text="Chat one-on-one once your payment is confirmed." />
+            <Feature icon={<HeartPulse className="h-5 w-5" />} title="All specialties" text="From general care to cardiology and mental health." />
+            <Feature icon={<Stethoscope className="h-5 w-5" />} title="Fair plans" text="300, 500 or 1000 ETB — pay only for what you need." />
           </div>
         </div>
-
         <div className="lg:pt-6">
           <AuthCard onDone={refresh} />
         </div>
@@ -109,16 +81,10 @@ function Feature({ icon, title, text }: { icon: React.ReactNode; title: string; 
 
 function AuthCard({ onDone }: { onDone: () => Promise<void> }) {
   const [role, setRole] = useState<Role>("patient");
-  const [mode, setMode] = useState<"signin" | "signup">("signup");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [fullName, setFullName] = useState("");
-  const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState(false);
   const widgetRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
-  // ── Telegram Login Widget ────────────────────────────────────────
   useEffect(() => {
     const container = widgetRef.current;
     if (!container) return;
@@ -136,7 +102,7 @@ function AuthCard({ onDone }: { onDone: () => Promise<void> }) {
         });
         if (error) throw error;
 
-        toast.success("Signed in with Telegram! 🚀");
+        toast.success("Welcome to Tena Specal! 🚀");
         await onDone();
         const { data } = await supabase.auth.getUser();
         const userId = data.user?.id;
@@ -168,46 +134,6 @@ function AuthCard({ onDone }: { onDone: () => Promise<void> }) {
     return () => { delete (window as any).onTelegramAuth; };
   }, [role]);
 
-  // ── Email / Password submit ──────────────────────────────────────
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      if (mode === "signup") {
-        if (!fullName.trim()) { toast.error("Please enter your full name."); return; }
-        const { error } = await supabase.auth.signUp({
-          email: email.trim(),
-          password,
-          options: {
-            emailRedirectTo: window.location.origin,
-            data: { full_name: fullName.trim(), phone: phone.trim(), account_type: role },
-          },
-        });
-        if (error) throw error;
-        toast.success("Account created. Welcome to Tena Specal!");
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-        if (error) throw error;
-        toast.success("Signed in.");
-      }
-      await onDone();
-      const { data } = await supabase.auth.getUser();
-      const userId = data.user?.id;
-      if (userId) {
-        const [{ data: prof }, { data: roles }] = await Promise.all([
-          supabase.from("profiles").select("account_type").eq("id", userId).maybeSingle(),
-          supabase.from("user_roles").select("role").eq("user_id", userId),
-        ]);
-        const admin = Boolean(roles?.some((r: any) => r.role === "admin"));
-        void navigate({ to: homeForUser({ isAdmin: admin, accountType: prof?.account_type ?? role }) });
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Something went wrong.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <Card className="border-border shadow-card">
       <CardContent className="p-6">
@@ -218,73 +144,32 @@ function AuthCard({ onDone }: { onDone: () => Promise<void> }) {
             <TabsTrigger value="doctor" className="gap-2"><Stethoscope className="h-4 w-4" /> Doctor</TabsTrigger>
           </TabsList>
           <TabsContent value="patient" className="mt-4">
-            <p className="text-sm text-muted-foreground">Create a patient account to browse specialists, choose a plan and start chatting.</p>
+            <p className="text-sm text-muted-foreground">Browse specialists, choose a plan and start chatting.</p>
           </TabsContent>
           <TabsContent value="doctor" className="mt-4">
-            <p className="text-sm text-muted-foreground">Join as a doctor. You'll complete a professional profile and upload your certificate for verification.</p>
+            <p className="text-sm text-muted-foreground">Join as a doctor, complete your profile and get verified.</p>
           </TabsContent>
         </Tabs>
 
         {/* Telegram Login */}
-        <div className="mt-5 flex flex-col items-center gap-2">
-          <p className="text-xs text-muted-foreground font-medium">Sign in instantly with Telegram</p>
-          <div ref={widgetRef} className="flex justify-center" />
-          {busy && <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />}
-        </div>
-
-        {/* Divider */}
-        <div className="my-5 flex items-center gap-3">
-          <div className="h-px flex-1 bg-border" />
-          <span className="text-xs text-muted-foreground">or use email</span>
-          <div className="h-px flex-1 bg-border" />
-        </div>
-
-        {/* Mode toggle */}
-        <div className="flex rounded-lg bg-muted p-1 text-sm font-medium">
-          {(["signup", "signin"] as const).map((m) => (
-            <button key={m} type="button" onClick={() => setMode(m)}
-              className={`flex-1 rounded-md py-1.5 transition-colors ${mode === m ? "bg-card text-foreground shadow-soft" : "text-muted-foreground"}`}>
-              {m === "signup" ? "Sign up" : "Log in"}
-            </button>
-          ))}
-        </div>
-
-        {/* Email / Password form */}
-        <form onSubmit={submit} className="mt-5 space-y-4">
-          {mode === "signup" && (
-            <>
-              <div className="space-y-1.5">
-                <Label htmlFor="fullName">Full name</Label>
-                <Input id="fullName" value={fullName} onChange={(e) => setFullName(e.target.value)}
-                  placeholder={role === "doctor" ? "Dr. Abebe Kebede" : "Hanna Tesfaye"} maxLength={100} required />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="phone">Phone number</Label>
-                <Input id="phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="09xxxxxxxx" maxLength={20} />
-              </div>
-            </>
+        <div className="mt-8 flex flex-col items-center gap-3">
+          <p className="text-sm font-semibold text-foreground">Sign up or log in with Telegram</p>
+          <p className="text-xs text-muted-foreground text-center">
+            One tap — no password needed. Your Telegram identity creates or accesses your account.
+          </p>
+          <div ref={widgetRef} className="mt-3 flex justify-center" />
+          {busy && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Signing you in…
+            </div>
           )}
-          <div className="space-y-1.5">
-            <Label htmlFor="email">Email</Label>
-            <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com" maxLength={255} required />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="password">Password</Label>
-            <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-              placeholder="At least 6 characters" minLength={6} maxLength={72} required />
-          </div>
-          <Button type="submit" variant="hero" size="lg" className="w-full" disabled={busy}>
-            {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {mode === "signup" ? `Create ${role} account` : "Log in"}
-          </Button>
-        </form>
+        </div>
 
-        <p className="mt-4 text-center text-xs text-muted-foreground">
+        <p className="mt-8 text-center text-xs text-muted-foreground">
           By continuing you agree that consultations are advisory and not a replacement for emergency care.
         </p>
       </CardContent>
     </Card>
   );
 }
-
