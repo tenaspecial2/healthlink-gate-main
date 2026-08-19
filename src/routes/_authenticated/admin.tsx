@@ -356,16 +356,19 @@ function AdminPage() {
   };
 
   const handleUpdateRole = async (userId: string, newRole: string) => {
+    setProfiles((prev) =>
+      prev.map((p) => (p.id === userId ? { ...p, account_type: newRole } : p))
+    );
     const { error } = await supabase
       .from("profiles")
       .update({ account_type: newRole })
       .eq("id", userId);
     if (error) {
       toast.error(error.message);
+      await load();
       return;
     }
     toast.success(`User role changed to ${newRole}.`);
-    await load();
   };
 
   if (!authLoading && !isAdmin) {
