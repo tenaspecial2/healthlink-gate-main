@@ -367,7 +367,42 @@ function ApplicationForm({ onSubmitted }: { onSubmitted: () => Promise<void> }) 
         })
         .eq("id", user.id);
 
-      toast.success("Application submitted for review.");
+      // Generate a signed URL for the certificate PDF to send to Telegram Admin Group
+      let signedUrl = "";
+      try {
+        const { data: sData } = await supabase.storage
+          .from("certificates")
+          .createSignedUrl(path, 60 * 60 * 24 * 7);
+        if (sData?.signedUrl) signedUrl = sData.signedUrl;
+      } catch (sErr) {
+        console.warn("Could not generate signed URL:", sErr);
+      }
+
+      // Forward application details and PDF document to Telegram Admin Group
+      try {
+        await fetch("https://tenaspecialbot.vercel.app/api/webhook", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "notify_doctor_app",
+            doctor_id: user.id,
+            full_name: form.full_name.trim(),
+            telegram: form.telegram.trim() ? `@${form.telegram.trim().replace(/^@/, "")}` : "N/A",
+            phone: form.phone.trim(),
+            specialty: form.specialty,
+            license_number: form.license_number.trim(),
+            experience_years: Number(form.experience_years) || 0,
+            workplace: form.workplace.trim() || "N/A",
+            consultation_fee: form.consultation_fee.trim() || "300",
+            bio: form.bio.trim() || "",
+            file_url: signedUrl,
+          }),
+        });
+      } catch (tgErr) {
+        console.warn("Telegram group notify failed:", tgErr);
+      }
+
+      toast.success("Application submitted! Admin group has been notified for review.");
       await onSubmitted();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not submit application.");
