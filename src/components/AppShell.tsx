@@ -35,7 +35,7 @@ export function AppShell({
   nav?: ReactNode;
   homeTo?: string;
 }) {
-  const { profile, signOut, user } = useAuth();
+  const { profile, signOut, user, isAdmin } = useAuth();
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
