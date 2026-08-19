@@ -106,6 +106,8 @@ type Prof = {
   email: string | null;
   phone: string | null;
   account_type: string;
+  telegram_username?: string | null;
+  telegram_id?: string | null;
   created_at: string;
 };
 
@@ -194,7 +196,7 @@ function AdminPage() {
       ] = await Promise.all([
         supabase.from("doctor_applications").select("*").order("created_at", { ascending: false }),
         supabase.from("consultations").select("*").order("created_at", { ascending: false }),
-        supabase.from("profiles").select("id, full_name, email, phone, account_type, created_at").order("created_at", { ascending: false }),
+        supabase.from("profiles").select("*").order("created_at", { ascending: false }),
         supabase.from("payout_requests").select("*").order("created_at", { ascending: false }),
         supabase.from("bot_settings").select("*"),
         supabase.from("bot_products").select("*").order("created_at", { ascending: false }),
@@ -394,11 +396,14 @@ function AdminPage() {
 
   const filteredProfiles = profiles.filter((p) => {
     const q = search.trim().toLowerCase();
+    if (!q) return true;
     return (
-      !q ||
       (p.full_name ?? "").toLowerCase().includes(q) ||
       (p.email ?? "").toLowerCase().includes(q) ||
-      (p.phone ?? "").toLowerCase().includes(q)
+      (p.phone ?? "").toLowerCase().includes(q) ||
+      (p.account_type ?? "").toLowerCase().includes(q) ||
+      ((p as any).telegram_username ?? "").toLowerCase().includes(q) ||
+      ((p as any).telegram_id ?? "").toString().toLowerCase().includes(q)
     );
   });
 
