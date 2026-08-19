@@ -43,8 +43,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .maybeSingle(),
       supabase.from("user_roles").select("role").eq("user_id", userId),
     ]);
-    setProfile((prof as Profile | null) ?? null);
-    setIsAdmin(Boolean(roles?.some((r) => r.role === "admin")));
+    const p = (prof as Profile | null) ?? null;
+    setProfile(p);
+    setIsAdmin(Boolean(p?.account_type === "admin" || roles?.some((r) => r.role === "admin")));
   };
 
   useEffect(() => {

@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { LogOut, Bell } from "lucide-react";
+import { LogOut, Bell, ShieldCheck } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { BrandLogo } from "@/components/BrandLogo";
 import { Button } from "@/components/ui/button";
@@ -123,6 +123,19 @@ export function AppShell({
                   {profile?.email}
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
+                {isAdmin && (
+                  <>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        void navigate({ to: "/admin" });
+                      }}
+                      className="text-primary font-medium"
+                    >
+                      <ShieldCheck className="mr-2 h-4 w-4" /> Admin Console
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                )}
                 <DropdownMenuItem
                   onClick={async () => {
                     await signOut();
