@@ -1,19 +1,21 @@
 -- ==============================================================================
--- TENA SPECIAL / HEALTHLINK COMPREHENSIVE DATABASE SCHEMA MIGRATION
--- Run this in Supabase SQL Editor to support the professional Admin Panel & Bot
+-- TENA SPECIAL / HEALTHLINK COMPREHENSIVE DATABASE SCHEMA MIGRATION (FIXED)
 -- ==============================================================================
 
--- 1. Bot Settings Table (Live configuration edited via Admin Panel)
+-- 1. Bot Settings Table & Columns
 CREATE TABLE IF NOT EXISTS public.bot_settings (
   key text PRIMARY KEY,
   value text NOT NULL DEFAULT '',
-  label text NOT NULL DEFAULT '',
-  category text NOT NULL DEFAULT 'general',
   description text DEFAULT '',
   updated_at timestamptz DEFAULT now()
 );
 
--- Insert default configurations (Safe: will not overwrite existing settings)
+-- Ensure label and category columns exist if the table was created previously
+ALTER TABLE public.bot_settings ADD COLUMN IF NOT EXISTS label text NOT NULL DEFAULT '';
+ALTER TABLE public.bot_settings ADD COLUMN IF NOT EXISTS category text NOT NULL DEFAULT 'general';
+ALTER TABLE public.bot_settings ADD COLUMN IF NOT EXISTS description text DEFAULT '';
+
+-- Insert or update default configurations
 INSERT INTO public.bot_settings (key, value, label, category, description) VALUES
   ('cbe_account', '1000255631865', 'CBE Account Number', 'payments', 'Commercial Bank of Ethiopia account number'),
   ('telebirr_account', '0908343267', 'Telebirr Account Number', 'payments', 'Telebirr phone number for mobile payments'),
@@ -28,14 +30,17 @@ INSERT INTO public.bot_settings (key, value, label, category, description) VALUE
   ('premium_price', '24', 'Premium Channel Fee (ETB/mo)', 'pricing', 'Monthly subscription fee for the premium channel'),
   ('commission_pct', '10', 'Platform Commission (%)', 'pricing', 'Percentage deducted from doctor consultations and services'),
   ('website_url', 'https://healthlink-gate-main-nine.vercel.app/', 'Portal Website URL', 'general', 'Official telemedicine website address')
-ON CONFLICT (key) DO NOTHING;
+ON CONFLICT (key) DO UPDATE 
+SET label = EXCLUDED.label,
+    category = EXCLUDED.category,
+    description = EXCLUDED.description;
 
 -- 2. Digital Store Products Table (Managed from Admin Panel)
 CREATE TABLE IF NOT EXISTS public.bot_products (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   title text NOT NULL,
-  specialty text NOT NULL DEFAULT 'internal', -- 'internal', 'obgyn', 'peds', 'general'
-  file_type text NOT NULL DEFAULT 'pdf',      -- 'pdf', 'video', 'doc'
+  specialty text NOT NULL DEFAULT 'internal',
+  file_type text NOT NULL DEFAULT 'pdf',
   price numeric NOT NULL DEFAULT 200,
   description text DEFAULT '',
   download_url text DEFAULT '',
@@ -73,13 +78,13 @@ CREATE TABLE IF NOT EXISTS public.bot_transactions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   doctor_telegram_id bigint,
   doctor_name text DEFAULT 'Platform',
-  item_type text NOT NULL, -- 'Consultation', 'Digital Product', 'Premium'
+  item_type text NOT NULL,
   item_title text NOT NULL,
   price numeric NOT NULL DEFAULT 0,
   commission numeric NOT NULL DEFAULT 0,
   net_amount numeric NOT NULL DEFAULT 0,
   user_id bigint NOT NULL,
-  status text DEFAULT 'approved', -- 'pending', 'approved', 'declined'
+  status text DEFAULT 'approved',
   created_at timestamptz DEFAULT now()
 );
 
@@ -142,7 +147,14 @@ GRANT ALL ON public.bot_transactions TO service_role, anon;
 GRANT ALL ON public.doctor_consultation_fees TO service_role, anon;
 GRANT ALL ON public.bot_fsm_states TO service_role, anon;
 
--- Open policies for anon / authenticated access
+-- Drop existing policies if they exist to prevent duplicate errors
+DROP POLICY IF EXISTS "Allow all on bot_settings" ON public.bot_settings;
+DROP POLICY IF EXISTS "Allow all on bot_products" ON public.bot_products;
+DROP POLICY IF EXISTS "Allow all on bot_transactions" ON public.bot_transactions;
+DROP POLICY IF EXISTS "Allow all on doctor_consultation_fees" ON public.doctor_consultation_fees;
+DROP POLICY IF EXISTS "Allow all on bot_fsm_states" ON public.bot_fsm_states;
+
+-- Create clean policies
 CREATE POLICY "Allow all on bot_settings" ON public.bot_settings FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all on bot_products" ON public.bot_products FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all on bot_transactions" ON public.bot_transactions FOR ALL USING (true) WITH CHECK (true);
