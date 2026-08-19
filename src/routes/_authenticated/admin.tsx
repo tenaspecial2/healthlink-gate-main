@@ -835,14 +835,17 @@ function AdminPage() {
                             />
                           </div>
                           <div>
-                            <Label htmlFor="p_url">Download / File URL (Optional)</Label>
+                            <Label htmlFor="p_url">Telegram File ID or Download Link</Label>
                             <Input
                               id="p_url"
                               value={prodForm.download_url}
                               onChange={(e) => setProdForm({ ...prodForm, download_url: e.target.value })}
-                              placeholder="https://..."
+                              placeholder="e.g. BQACAgQAAxkBAA... or https://..."
                               className="mt-1"
                             />
+                            <p className="mt-1.5 text-[11px] text-muted-foreground">
+                              💡 <b>Automatic Delivery:</b> Upload your PDF book to the Telegram Bot with caption <code>/getfileid</code>, copy the File ID, and paste it here. When payment is approved, the bot instantly sends the book directly to the user!
+                            </p>
                           </div>
                         </div>
                         <div className="flex justify-end gap-2">
