@@ -1,5 +1,5 @@
 -- ==============================================================================
--- TENA SPECIAL / HEALTHLINK COMPREHENSIVE DATABASE SCHEMA MIGRATION (FIXED)
+-- TENA SPECIAL / HEALTHLINK COMPREHENSIVE DATABASE SCHEMA MIGRATION (CLEAN)
 -- ==============================================================================
 
 -- 1. Bot Settings Table & Columns
@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS public.bot_settings (
   updated_at timestamptz DEFAULT now()
 );
 
--- Ensure label and category columns exist if the table was created previously
+-- Ensure label and category columns exist
 ALTER TABLE public.bot_settings ADD COLUMN IF NOT EXISTS label text NOT NULL DEFAULT '';
 ALTER TABLE public.bot_settings ADD COLUMN IF NOT EXISTS category text NOT NULL DEFAULT 'general';
 ALTER TABLE public.bot_settings ADD COLUMN IF NOT EXISTS description text DEFAULT '';
@@ -35,7 +35,7 @@ SET label = EXCLUDED.label,
     category = EXCLUDED.category,
     description = EXCLUDED.description;
 
--- 2. Digital Store Products Table (Managed from Admin Panel)
+-- 2. Digital Store Products Table
 CREATE TABLE IF NOT EXISTS public.bot_products (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   title text NOT NULL,
@@ -73,7 +73,7 @@ INSERT INTO public.bot_products (title, specialty, file_type, price, description
 SELECT 'የሕፃናት ምግብና እድገት (Child Nutrition & Growth)', 'peds', 'pdf', 200, 'Essential infant nutrition and milestone tracking handbook.', true
 WHERE NOT EXISTS (SELECT 1 FROM public.bot_products WHERE title LIKE '%የሕፃናት ምግብና እድገት%');
 
--- 3. Bot Transactions Table (Receipts, Platform Commissions & Doctor Earnings)
+-- 3. Bot Transactions Table
 CREATE TABLE IF NOT EXISTS public.bot_transactions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   doctor_telegram_id bigint,
@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS public.bot_transactions (
   created_at timestamptz DEFAULT now()
 );
 
--- 4. Doctor Consultation Fees & Online Status Table
+-- 4. Doctor Consultation Fees & FSM Tables
 CREATE TABLE IF NOT EXISTS public.doctor_consultation_fees (
   telegram_id bigint PRIMARY KEY,
   text_fee numeric DEFAULT 100,
@@ -98,7 +98,6 @@ CREATE TABLE IF NOT EXISTS public.doctor_consultation_fees (
   updated_at timestamptz DEFAULT now()
 );
 
--- 5. FSM States Table (For stateless Telegram webhooks)
 CREATE TABLE IF NOT EXISTS public.bot_fsm_states (
   user_id bigint PRIMARY KEY,
   state text NOT NULL DEFAULT '',
@@ -106,55 +105,36 @@ CREATE TABLE IF NOT EXISTS public.bot_fsm_states (
   updated_at timestamptz DEFAULT now()
 );
 
--- 6. Recreate public_doctor_profiles view with all required profile data
-CREATE OR REPLACE VIEW public.public_doctor_profiles AS
-SELECT 
-  da.id, 
-  da.doctor_id, 
-  da.full_name, 
-  da.specialty,
-  da.city, 
-  da.experience_years, 
-  da.education,
-  da.bio, 
-  da.languages,
-  da.workplace, 
-  da.consultation_fee, 
-  da.schedule,
-  da.avatar_path, 
-  da.certificate_path,
-  da.status, 
-  da.created_at,
-  p.telegram_id, 
-  p.telegram_username,
-  p.phone,
-  p.email
-FROM doctor_applications da
-JOIN profiles p ON p.id = da.doctor_id
-WHERE da.status = 'approved';
+-- 5. Safe update to public_doctor_profiles table columns
+DO $$ 
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'public_doctor_profiles') THEN
+    ALTER TABLE public.public_doctor_profiles ADD COLUMN IF NOT EXISTS telegram_id bigint;
+    ALTER TABLE public.public_doctor_profiles ADD COLUMN IF NOT EXISTS telegram_username text;
+    ALTER TABLE public.public_doctor_profiles ADD COLUMN IF NOT EXISTS avatar_path text;
+  END IF;
+END $$;
 
--- 7. Grant Permissions & RLS Policies
+-- 6. Grant Permissions & RLS Policies
 ALTER TABLE public.bot_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bot_products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bot_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.doctor_consultation_fees ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bot_fsm_states ENABLE ROW LEVEL SECURITY;
 
--- Allow service role and anon read/write
 GRANT ALL ON public.bot_settings TO service_role, anon;
 GRANT ALL ON public.bot_products TO service_role, anon;
 GRANT ALL ON public.bot_transactions TO service_role, anon;
 GRANT ALL ON public.doctor_consultation_fees TO service_role, anon;
 GRANT ALL ON public.bot_fsm_states TO service_role, anon;
 
--- Drop existing policies if they exist to prevent duplicate errors
+-- Clean existing policies to prevent conflicts
 DROP POLICY IF EXISTS "Allow all on bot_settings" ON public.bot_settings;
 DROP POLICY IF EXISTS "Allow all on bot_products" ON public.bot_products;
 DROP POLICY IF EXISTS "Allow all on bot_transactions" ON public.bot_transactions;
 DROP POLICY IF EXISTS "Allow all on doctor_consultation_fees" ON public.doctor_consultation_fees;
 DROP POLICY IF EXISTS "Allow all on bot_fsm_states" ON public.bot_fsm_states;
 
--- Create clean policies
 CREATE POLICY "Allow all on bot_settings" ON public.bot_settings FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all on bot_products" ON public.bot_products FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all on bot_transactions" ON public.bot_transactions FOR ALL USING (true) WITH CHECK (true);
